@@ -5,22 +5,8 @@ var http = require('http'),
 var httpProxy = require('http-proxy');
 
 var fs = require('fs');
-//const execa = require('execa');
+var shell = require('shelljs');
 
-var selects = [];
-var simpleselect = {};
-
-//Section for Login Details Popup
-//var tmoslogstats = execa.stdout('tmsh', ['show auth login']);
-var loginstats = '<script> function loginStats() { alert(\'stats\');}</script>';
-
-simpleselect.query = '<head>';
-simpleselect.func = function (node) {
-	node.createWriteStream().end(loginstats);
-}
-selects.push(simpleselect);
-
-//console.log(tmoslogstats);
 
 // BIG-IP Paths
 bigKey = "/config/httpd/conf/ssl.key/server.key";
@@ -54,20 +40,71 @@ var username;
 guiProxy.on('proxyReq', function(proxyReq, req, res, options) {
 //	console.log(proxyReq._headers.cookie);
 	var cookies = proxyReq._headers.cookie;
+	if (cookies) {
+
 	var usearch = cookies.search(usernameCookie);
-//	console.log(usearch);
 
 	var cookiestring = cookies.substring(usearch).replace(usernameCookie + "=", '');
 
-	console.log(cookiestring);
+	var userstats = getUserStats(cookiestring);
+	}
+});
 
+//Section for Login Details Popup
+function getUserStats(username) {
+	var userstatscmd = shell.exec('tmsh show auth login ' + username, {silent:true}).stdout;
 
-//	if (cookies.indexOf(usernameCookie)) {
-//		console.log('fount it @ ' + cookies.indexOf(usernameCookie));
-//		var bigipcookie = cookies[cookies.indexOf(usernameCookie)];
-//       	//console.log(bigipcookie);
-//	}
+	return userstatscmd;
+};
 
+var loginstats = '<script> function loginStats() { alert("userstat");}</script>';
+
+function modHtml(str) {
+	if (str.indexOf('</head>') > -1) {
+		str = str.replace('</head>', loginstats + '</head>');
+	}
+	return str;
+}
+
+guiProxy.on('proxyRes', function(proxyRes, request, response) {
+	if (proxyRes.headers &&
+        proxyRes.headers['content-type'] &&
+        proxyRes.headers['content-type'].match('text/html')) {
+
+        var _end = response.end,
+            chunks,
+            _writeHead = response.writeHead;
+
+        response.writeHead = function(){
+            if(proxyRes.headers && proxyRes.headers['content-length']){
+                response.setHeader(
+                    'content-length', (parseInt( proxyRes.headers['content-length'], 10 ) + loginstats.length) * 2);
+            }
+            // This disables chunked encoding
+            response.setHeader( 'transfer-encoding', '' );
+
+            // Disable cache for all http as well
+            response.setHeader( 'cache-control', 'no-cache' );
+
+            _writeHead.apply( this, arguments );
+        };
+
+        response.write = function( data ) {
+            if( chunks ) {
+                chunks += data;
+            } else {
+                chunks = data;
+            }
+        };
+
+        response.end = function() {
+            if( chunks && chunks.toString ) {
+                _end.apply( response, [ modHtml( chunks.toString() ) ] );
+            } else {
+                _end.apply( response, arguments );
+            }
+        };
+	}
 });
 
 guiProxy.on('error', function (err, req, res) {
