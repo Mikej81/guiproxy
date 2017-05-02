@@ -420,13 +420,13 @@ function renderUpdates(callbackOnce) {
 					$('#advisoryfoot').remove();
 				}
 				//Render Login Stats Element
-				var loginstatsText = Escape.toXmlText($(response).find('loginstats').attr('label'));
-				var loginstatsUser = $(response).find('loginstats').attr('user');
+				var statsText = Escape.toXmlText($(response).find('loginstats').attr('label'));
+				var statsUser = $(response).find('loginstats').attr('user');
 
-				if (loginstatsText) {
+				if ((statsText != loginstatsText) || (statsUser != loginstatsUser)) {
 					var headerObject = $('#header');
-					var loginStatsHtml = '<div id="loginstatshead" style="containfloat">' + loginstatsTUser + '</div>';
-					headerObject.prepend(loginStatsHtml);
+					var loginStatsHtml = '<div id="loginstatshead" style="containfloat">' + loginstatsUser + '</div>';
+					headerObject.append(loginStatsHtml);
 				}
 
 				// Render <deviceid>, <dateandtime>, and <userinfo> elements

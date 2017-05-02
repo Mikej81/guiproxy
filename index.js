@@ -114,7 +114,9 @@ var proxyResponse = guiProxy.on('proxyRes', function(proxyRes, request, response
                 	data = data.toString('utf-8');
                 	body += data;
 			//var newbody = body.replace('</document>',"<loginstats label=\"" + userloginstats+ "\" user=\"" + uName + "\" />\r\n</document>");
-			newbody = body.replace('</document>',"<loginstats label=\"userloginstats\" user=\"" + uName + "\" />\r\n</document>");
+			newbody = body.replace('</document>',"<loginstats label=\"userloginstats\" user=\"" + uName + "\" />\r\n");
+			newbody += "<alert label=\"Login\" id=\"100\" path=\"/\" details=\"LoginStats?\">\r\n";
+			newbody += "</document>";
 			//console.log(newbody);
 		} else if (proxyRes.headers['content-type'] === 'text/javascript' && request.url.indexOf('xui.js') > -1) {
 			data = data.toString('utf-8');
@@ -125,7 +127,8 @@ var proxyResponse = guiProxy.on('proxyRes', function(proxyRes, request, response
 	proxyRes.write = function(data) {
 		try {
 	  		_write.call(response,newbody);
-		} catch (err){}
+		} catch (err){
+			console.log("error writing:", err);}
 	}
 
 	if (proxyRes.headers['content-type'] == 'text/html' && proxyRes.headers['content-length']) {
