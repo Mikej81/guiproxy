@@ -1,7 +1,7 @@
 {
-  "name": "guiproxy",
-  "version": "1.0.0",
-  "description": "GUI Proxy",
+  "name": "tmuiproxy",
+  "version": "0.0.1",
+  "description": "TMUI Proxy",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -11,6 +11,17 @@
   "dependencies": {
     "connect": "^3.6.1",
     "http-proxy": "^1.16.2",
+    "ldapjs": "^1.0.1",
+    "ocsp": "^1.2.0",
     "shelljs": "^0.7.7"
-  }
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mikej81/guiproxy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Mikej81/guiproxy/issues"
+  },
+  "homepage": "https://github.com/Mikej81/guiproxy#readme"
 }
