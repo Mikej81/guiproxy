@@ -1,92 +1,110 @@
-//process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 var http = require('http'),
+	net = require('net'),
+	express = require('express');
 	connect = require('connect'),
         https = require('https');
 
 var httpProxy = require('http-proxy');
-
-var fs = require('fs');
 var shell = require('shelljs');
+var fs = require('fs');
+var url = require('url');
 
-var selects = [];
-var simpleselect = {};
+//Do something to check for Username in a Cookie then adjust rules
 
-simpleselect.query = 'document';
-simpleselect.func = function (node) {
-	var out = '<loginstats label="Failed Logons since Last" />';
-//	var out = '<div id="myAlert" style="display:none" class="alert alert-warning alert-dismissible" role="alert">';
-//	out +=    '<button type="button" class="close" data-dismiss="alert" aria-label="Close">';
-//      out +=	  '<span aria-hidden="true">&times;</span> </button>';
-//	out +=    'Logon Stats</div>';
-
-	var rs = node.createReadStream();
-	var ws = node.createWriteStream({outer:false});
-
-	rs.pipe(ws, {end: false});
-	rs.on('end', function() {
-		ws.end(out);
-	});
-	
-}
-
-
-var app = connect();
-
-// Replacement XUI.JS File
-var xuiJS = fs.readFileSync("./xui.js", "utf8");
 
 // BIG-IP Paths
 bigKey = "/config/httpd/conf/ssl.key/server.key";
 bigCert = "/config/httpd/conf/ssl.crt/server.crt";
 
+banner = fs.readFileSync('./consent_banner.html').toString();
+
 var key = fs.readFileSync(bigKey);
 var cert = fs.readFileSync(bigCert);
 
-var proxyOptions = {
-        https: {
-                key: key,
-                cert: cert
-        }
-};
-
-var httpsAgent = new https.Agent({
-	"key": key,
-	"cert": cert
-});
-
-var httpsCreds = {
+const httpsServerOptions = {
 	key: key,
-	cert: cert,
-	requestCert: false,
-	rejectUnauthorized: false
+	cert: cert
 };
 
-var guiProxy = httpProxy.createProxyServer({
+const proxyOptions = {
+	ssl: {
+		key: key,
+		cert: cert
+	}, 
+	target: 'https://127.0.0.1:444',
+	secure: false
+};
+
+const bannerProxy = {
+	ssl: {
+		key: key,
+		cert: cert
+	},
+	target: 'https://127.0.0.1:446',
+	secure: false
+};
+
+const statsProxyOptions = {
         ssl: {
-                key: key,
+              	key: key,
                 cert: cert
         },
-	agent: httpsAgent,
-        target: 'https://127.0.0.1:444',
+	target: 'https://127.0.0.1:445',
         secure: false
-});
+};
 
-app.use(require('harmon')([], selects));
-app.use(function (req, res) {
-		guiProxy.web(req, res, {target: 'https://127.0.0.1:444'});
-});
-
-https.createServer(httpsCreds, app, function(req, res) {}).listen(443);
+//Create 443 Proxy
+var proxy = httpProxy.createServer();
 
 //We need to get username from logon, so look for the BIGIPAuthUsernameCookie
-	var usernameCookie = "BIGIPAuthUsernameCookie";
+var usernameCookie = "BIGIPAuthUsernameCookie";
 //BIGIPAuthCookie=0BD6095556437BA7A5D7F9A786362FA5A690193E',
 //BIGIPAuthUsernameCookie=xadmin'
-	var username;
+var username;
 
-var proxyRequest = guiProxy.on('proxyReq', function(proxyReq, req, res, options) {
-	//	console.log(proxyReq);	
+var server = https.createServer(httpsServerOptions, function (req, res){
+  var cookies = req.headers.cookie
+  if (cookies) {
+    var bigIPAuthCookie = cookies.search('BIGIPAuthCookie');
+    var userSearch = cookies.search(usernameCookie);
+    var userCookie = cookies.substr(userSearch).replace(usernameCookie + "=", '');
+    var statsCookie = cookies.search('LoginStatsAlert');
+    var lowercaseUrl = req.url.toLowerCase();
+    var bannerCookie = cookies.search('ConsentBanner');
+    if (userCookie.indexOf(';') !== -1) {
+	username = userCookie.substr(0, userCookie.indexOf(';'));
+    } else {
+	username = userCookie;
+    }
+
+  //	console.log('Proxying GUI Requests for: ' + req.url);
+  //	console.log('Request Headers ' + JSON.stringify(req.headers, true, 2));
+  //	console.log('Request Cookies ' + JSON.stringify(req.headers.cookie, true, 2));
+  //	console.log('Request UserName ' + req.headers.cookie.search("BIGIPAuthUsernameCookie"));
+  //	console.log('Request Username ' + username);
+  //	console.log('Requesting URL: ' + req.url);
+  //	console.log('statsCookie' + statsCookie);
+  //	(lowercaseUrl.indexOf('/xui/', req.url.length -5) !==-1)
+
+	if (bannerCookie == -1) {
+		proxy.web(req, res, bannerProxy);
+	} else if (statsCookie == -1 && bigIPAuthCookie !== -1) {
+	  proxy.web(req, res, statsProxyOptions);
+	} else {
+	  proxy.web(req, res, proxyOptions);
+	}
+  } else {
+	proxy.web(req, res, bannerProxy);
+  }
+}).listen(443);
+
+// Listen for the `error` event on `proxy`.
+proxy.on('error', function (err, req, res) {
+  res.writeHead(500, {
+    'Content-Type': 'text/plain'
+  });
+
+  res.end('Something went wrong. And we are reporting a custom error message.');
 });
 
 //Section for Login Details Popup
@@ -95,51 +113,25 @@ function getUserStats(username) {
 	return userstatscmd;
 };
 
-var proxyResponse = guiProxy.on('proxyRes', function(proxyRes, request, response) {
-	var cookies = proxyRes.headers['set-cookie'];
-	if (cookies) {
-                var usearch = cookies.toString().search(usernameCookie);
-                var cookiestring = cookies.toString().substr(usearch).replace(usernameCookie + "=", '');
-		var uName = cookiestring.substr(0, cookiestring.indexOf(';'));
-                var userloginstats = getUserStats(uName);
-        }
-	
-	var _write = response.write;
-	var output = "";
-	var body = "";
-	var newbody = "";
+//Create Webserver with LoginStats
+https.createServer(httpsServerOptions, function(req, res) {
+  res.writeHead(200);
+	var outstring = "<html><head>";
+	outstring += "<script>function setCookie(cname,cvalue) {";
+    	outstring += "var d = new Date();";
+	outstring += "d.setTime(d.getTime() + (60*1000));";
+    	outstring += "var expires = \"expires=\" + d.toGMTString();";
+    	outstring += "document.cookie = cname + \"=\" + cvalue + \";\" + expires + \";path=/\"; ";
+    	outstring += "location.href = \"/\";}";
+	outstring += "</script></head><body><form><table width=\"350\"><tr><td>" + getUserStats(username)  + "</tr></td>";
+	outstring += "</table><input type=\"button\" value=\"OK\" id=\"submit\"";
+	outstring += " onclick=\"setCookie('LoginStatsAlert', 'true')\"></form></body></html>";
 
-	proxyRes.on('data', function(data) {
-		if (proxyRes.headers['content-type'] === 'text/xml'){
-                	data = data.toString('utf-8');
-                	body += data;
-			//var newbody = body.replace('</document>',"<loginstats label=\"" + userloginstats+ "\" user=\"" + uName + "\" />\r\n</document>");
-			newbody = body.replace('</document>',"<loginstats label=\"userloginstats\" user=\"" + uName + "\" />\r\n");
-			newbody += "<alert label=\"Login\" id=\"100\" path=\"/\" details=\"LoginStats?\">\r\n";
-			newbody += "</document>";
-			//console.log(newbody);
-		} else if (proxyRes.headers['content-type'] === 'text/javascript' && request.url.indexOf('xui.js') > -1) {
-			data = data.toString('utf-8');
-			body += data;
-			newbody = xuiJS;
-		}
-	});
-	proxyRes.write = function(data) {
-		try {
-	  		_write.call(response,newbody);
-		} catch (err){
-			console.log("error writing:", err);}
-	}
+  res.end(outstring);
+}).listen(445);
 
-	if (proxyRes.headers['content-type'] == 'text/html' && proxyRes.headers['content-length']) {
-		delete proxyRes.headers['content-length']
-	}
-});
-
-guiProxy.on('error', function (err, req, res) {
-	res.writeHead(500, {
-	 'Content-Type': 'text/plain'	
-	});
-
-	res.end('Something went wrong, please try again in a minute.' + err);
-});
+//Create Webserver with Clickthrough Banner
+https.createServer(httpsServerOptions, function(req, res) {
+  res.writeHead(200);
+  res.end(banner);
+}).listen(446);

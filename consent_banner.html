@@ -1,0 +1,94 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<html>
+<head>
+<title>DoD Warning Banner</title>
+<style type="text/css">
+BODY {
+    background-color: #E0E0E0;margin: 0 0 0 0;
+	text-align:center;
+	font-size:62.5%;
+	font-family:verdana,helvetica,arial,sans-serif;
+}
+#shadow-container {
+	background-color:#909090;
+	margin:20px auto 0 auto;width:612px
+}
+#container {
+	position:relative;
+	background-color:#F0F0F0;
+	border:1px solid #404040;
+	padding:5px 5px 5px 5px;
+	width:600px;
+	text-align:left;
+	left:-5px;  
+	top: -5px;
+}
+#titlebox {
+	width:598px;
+	height:35px;
+	text-align:center;
+	font-size:2.2em;
+	font-weight:bold;
+}
+#faultbox {
+	padding:6px 6px 0 6px;
+	width:586px;
+	text-align:justify;
+	font-size:1.5em;
+	color: #FF0000;
+	font-weight:bold;
+}
+#gotobox {
+	padding-top:5px;
+	width:598px;
+	text-align:left;
+	font-size:1.2em;
+}
+#gotobox ul {
+	list-style-type:square;
+}
+#gotobox li {
+	padding:7px;
+}
+#btn{
+	width:230px;
+	height:45px;
+	font-family:arial,helvetica,courier;
+	font-size:14px;
+	font-weight:bold;
+}
+#buttonbox {
+	text-align:center
+}
+</style>
+<script>
+function setCookie(cname,cvalue) {
+        var d = new Date();
+        d.setTime(d.getTime() + (60*1000));
+        var expires = "expires=" + d.toGMTString();
+        document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/";
+        location.href = "/";
+}
+</script>
+</head>
+<body onload="OnLoad()">
+	<div id="shadow-container">
+		<div id="container">
+			<div id="titlebox">USG Warning and Consent Banner</div>
+			<div id="faultbox">You are accessing a U.S. Government (USG) Information System (IS) that is provided for USG-authorized use only. By using this IS (which includes any device attached to this IS), you consent to the following conditions:</div>
+			<div id="gotobox">
+				<ul>
+					<li>The USG routinely intercepts and monitors communications on this IS for purposes including, but not limited to, penetration testing, COMSEC monitoring, network operations and defense, personnel misconduct (PM), law enforcement (LE), and counterintelligence (CI) investigations.</li>
+					<li>At any time, the USG may inspect and seize data stored on this IS.</li>
+					<li>Communications using, or data stored on, this IS are not private, are subject to routine monitoring, interception, and search, and may be disclosed or used for any USG authorized purpose.</li>
+					<li>This IS includes security measures (e.g., authentication and access controls) to protect USG interests--not for your personal benefit or privacy.</li>
+					<li>Notwithstanding the above, using this IS does not constitute consent to PM, LE or CI investigative searching or monitoring of the content of privileged communications, or work product, related to personal representation or services by attorneys, psychotherapists, or clergy, and their assistants. Such communications and work product are private and confidential. See User Agreement for details.</li>
+				</ul>
+			</div>
+			<div id="buttonbox">
+				<button id="btn" onclick="setCookie('ConsentBanner', 'true')">OK </button>
+			</div>
+		</div>
+	</div>
+</body>
+</html>
