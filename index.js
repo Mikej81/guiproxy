@@ -4,12 +4,28 @@ var http = require('http'),
 	connect = require('connect'),
         https = require('https');
 
+var ossl = require('openssl-wrapper');
+
 var httpProxy = require('http-proxy');
 var shell = require('shelljs');
 var fs = require('fs');
 var url = require('url');
+var certpem = require('certpem').certpem;
 
 //Do something to check for Username in a Cookie then adjust rules
+
+function pemCert(derbuff) {
+  var cert;
+  var parsedPem;
+	ossl.exec('x509', derbuff, { inform: 'der', outform: 'pem' }, function (err, pembuff) {
+          if (err) {
+                console.log('im broke bitch');
+          } else {
+		console.log(pembuff.toString());
+                return pembuff.toString();
+          }
+	});
+};
 
 
 // BIG-IP Paths
@@ -23,7 +39,9 @@ var cert = fs.readFileSync(bigCert);
 
 const httpsServerOptions = {
 	key: key,
-	cert: cert
+	cert: cert,
+	requestCert: true,
+	rejectUnauthorized: false
 };
 
 const proxyOptions = {
@@ -60,9 +78,36 @@ var proxy = httpProxy.createServer();
 var usernameCookie = "BIGIPAuthUsernameCookie";
 //BIGIPAuthCookie=0BD6095556437BA7A5D7F9A786362FA5A690193E',
 //BIGIPAuthUsernameCookie=xadmin'
+//OtherName OID 1.3.6.1.4.1.311.20.2.3
 var username;
 
 var server = https.createServer(httpsServerOptions, function (req, res){
+
+if (req.socket) {
+	var uCert = req.socket.getPeerCertificate();
+	//console.log(uCert.subject);
+	//var subjectAltName = uCert.subjectaltname;
+	var edipi;
+	var certCN
+	if (Object.prototype.toString.call(uCert.subject.CN) === '[object Array]') {
+		certCN = uCert.subject.CN.join();
+		console.log(certCN);
+	} else {
+		certCN = uCert.subject.CN;
+	}
+
+	console.log(certCN);
+	var emailAddress = uCert.subject.emailAddress;
+
+	//var pem = pemCert(uCert.raw, function(response) {return response; });
+	//var pem = pemCert(uCert.raw);
+	//console.log(pem);
+	var edipi = certCN.substr(certCN.lastIndexOf('.') + 1, certCN.length) + '@MIL';
+	console.log(edipi);
+
+	console.log(new Date() +' ' + req.connection.remoteAddress +' '+ edipi +' '+ req.method +' '+ req.url);
+}
+
   var cookies = req.headers.cookie
   if (cookies) {
     var bigIPAuthCookie = cookies.search('BIGIPAuthCookie');
@@ -76,15 +121,6 @@ var server = https.createServer(httpsServerOptions, function (req, res){
     } else {
 	username = userCookie;
     }
-
-  //	console.log('Proxying GUI Requests for: ' + req.url);
-  //	console.log('Request Headers ' + JSON.stringify(req.headers, true, 2));
-  //	console.log('Request Cookies ' + JSON.stringify(req.headers.cookie, true, 2));
-  //	console.log('Request UserName ' + req.headers.cookie.search("BIGIPAuthUsernameCookie"));
-  //	console.log('Request Username ' + username);
-  //	console.log('Requesting URL: ' + req.url);
-  //	console.log('statsCookie' + statsCookie);
-  //	(lowercaseUrl.indexOf('/xui/', req.url.length -5) !==-1)
 
 	if (bannerCookie == -1) {
 		proxy.web(req, res, bannerProxy);
