@@ -1,8 +1,5 @@
 var http = require('http'),
-	net = require('net'),
-	express = require('express');
-	connect = require('connect'),
-        https = require('https');
+    https = require('https');
 
 var forge = require('node-forge');
 forge.options.usePureScript = true;
@@ -13,26 +10,7 @@ var httpProxy = require('http-proxy');
 var shell = require('shelljs');
 var fs = require('fs');
 var url = require('url');
-var certpem = require('certpem').certpem;
 
-var subjectAltValidator = {
-  id: '2.5.29.17',
-  name: 'subjectAltName',
-  critical: false,
-  tagClass: forge.asn1.Class.UNIVERSAL,
-  type: forge.asn1.Type.SEQUENCE,
-  constructed: true,
-  captureAsn1: 'subjectAltName',
-  value: [{
-    name:  'subjectAltName.UPN',
-    tagClass: asn1.Class.UNIVERSAL,
-    type: asn1.Type.OCTECTSTRING,
-    capture: 'UPN'
-  }]
-};
-
-var capture = {};
-var errors = [];
 
 // BIG-IP Paths
 bigKey = "/config/httpd/conf/ssl.key/server.key";
@@ -91,8 +69,6 @@ var server = https.createServer(httpsServerOptions, function (req, res){
 
 if (req.socket) {
 	var uCert = req.socket.getPeerCertificate();
-	//console.log(uCert.subject);
-	//var subjectAltName = uCert.subjectaltname;
 	var edipi;
 	var certCN
 	if (Object.prototype.toString.call(uCert.subject.CN) === '[object Array]') {
@@ -115,15 +91,6 @@ if (req.socket) {
 	var parsedEdipi = parsedSubjectAlts['value'].substr(parsedSubjectAlts['value'].toLowerCase().indexOf('@mil') - 10, 14);
 
 	console.log(parsedEdipi);
-
-	for (var i = 0; i < keys.length; i++) {
-		//if (parsedSubjectAlts[keys[i]] && parsedSubjectAlts[keys[i]].toLowerCase().indexOf('@mil' === -1)) {
-		  //console.log(parsedSubjectAlts[keys[i]]);
-		//}
-	}
-
-	//edipi = certCN.substr(certCN.lastIndexOf('.') + 1, certCN.length) + '@MIL';
-	//console.log(edipi);
 
 	console.log(new Date() +' ' + req.connection.remoteAddress +' '+ edipi +' '+ req.method +' '+ req.url);
 }
