@@ -4,7 +4,11 @@ var http = require('http'),
 	connect = require('connect'),
         https = require('https');
 
-var ossl = require('openssl-wrapper');
+//var ossl = require('openssl-wrapper');
+var forge = require('node-forge');
+forge.options.usePureScript = true;
+var pki = forge.pki;
+var asn1 = forge.asn1;
 
 var httpProxy = require('http-proxy');
 var shell = require('shelljs');
@@ -14,19 +18,42 @@ var certpem = require('certpem').certpem;
 
 //Do something to check for Username in a Cookie then adjust rules
 
-function pemCert(derbuff) {
-  var cert;
-  var parsedPem;
-	ossl.exec('x509', derbuff, { inform: 'der', outform: 'pem' }, function (err, pembuff) {
-          if (err) {
-                console.log('im broke bitch');
-          } else {
-		console.log(pembuff.toString());
-                return pembuff.toString();
-          }
-	});
+//function pemCert(derbuff, callback) {
+//  var cert;
+//  co(function*() {
+//  var parsedPem = yield ossl.exec('x509', derbuff, { inform: 'der', outform: 'pem' }, function (err, pembuff) {});
+//  });
+//};
+
+//Tag: Universal:16 (Sequence)
+//        Constructed: true
+//        Sub values: 2
+//          Tag: Universal:6 (Object Identifier)
+//          Constructed: false
+//          Value: 2.5.29.17 (subjectAltName) 0x551d11,
+//          Tag: Universal:4 (Octet string)
+//          Constructed: false
+//          Value: 0x3035a01d060a2b060104018237140203a00f0c0d383637353330393031404d494c81146d636f6c656d616e40663566656473652e636f6d,
+
+
+var subjectAltValidator = {
+  id: '2.5.29.17',
+  name: 'subjectAltName',
+  critical: false,
+  tagClass: forge.asn1.Class.UNIVERSAL,
+  type: forge.asn1.Type.SEQUENCE,
+  constructed: true,
+  captureAsn1: 'subjectAltName',
+  value: [{
+    name:  'subjectAltName.UPN',
+    tagClass: asn1.Class.UNIVERSAL,
+    type: asn1.Type.OCTECTSTRING,
+    capture: 'UPN'
+  }]
 };
 
+var capture = {};
+var errors = [];
 
 // BIG-IP Paths
 bigKey = "/config/httpd/conf/ssl.key/server.key";
@@ -91,19 +118,44 @@ if (req.socket) {
 	var certCN
 	if (Object.prototype.toString.call(uCert.subject.CN) === '[object Array]') {
 		certCN = uCert.subject.CN.join();
-		console.log(certCN);
 	} else {
 		certCN = uCert.subject.CN;
 	}
 
-	console.log(certCN);
 	var emailAddress = uCert.subject.emailAddress;
 
-	//var pem = pemCert(uCert.raw, function(response) {return response; });
-	//var pem = pemCert(uCert.raw);
-	//console.log(pem);
-	var edipi = certCN.substr(certCN.lastIndexOf('.') + 1, certCN.length) + '@MIL';
-	console.log(edipi);
+	var pem = forge.asn1.fromDer(uCert.raw.toString('binary'));
+	var forgecert = pki.certificateFromAsn1(pem);
+	var asn1Cert = pki.certificateToAsn1(forgecert);
+
+	var subjectAlt = forgecert.getExtension({id: '2.5.29.17'});
+	var jsonSubjectAlts = JSON.stringify(subjectAlt, true, 2);
+	var parsedSubjectAlts = JSON.parse(jsonSubjectAlts);
+	var keys = Object.keys(parsedSubjectAlts);
+	
+	//console.log(parsedSubjectAlts['value']);
+	//console.log(parsedSubjectAlts['value'].lastIndexOf('\n'));
+	//console.log(parsedSubjectAlts['value'].toLowerCase().indexOf('@mil'));
+
+	var parsedEdipi = parsedSubjectAlts['value'].substr(parsedSubjectAlts['value'].lastIndexOf('\n') +1, parsedSubjectAlts['value'].toLowerCase().indexOf('@mil') -1);
+
+	console.log(parsedEdipi);
+	console.log(parsedEdipi.indexOf('\r\n'));
+
+
+	for (var i = 0; i < keys.length; i++) {
+		//if (parsedSubjectAlts[keys[i]] && parsedSubjectAlts[keys[i]].toLowerCase().indexOf('@mil' === -1)) {
+		  //console.log(parsedSubjectAlts[keys[i]]);
+		//}
+	}
+
+	//console.log(JSON.stringify(subjectAlt, true, 2));	
+
+	//console.log(forge.asn1.prettyPrint(asn1Cert, 3));
+
+	//console.log("pem", pem);
+	edipi = certCN.substr(certCN.lastIndexOf('.') + 1, certCN.length) + '@MIL';
+	//console.log(edipi);
 
 	console.log(new Date() +' ' + req.connection.remoteAddress +' '+ edipi +' '+ req.method +' '+ req.url);
 }
