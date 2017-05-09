@@ -1,3 +1,5 @@
+//process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 var http = require('http'),
     https = require('https');
 
@@ -10,6 +12,9 @@ var httpProxy = require('http-proxy');
 var shell = require('shelljs');
 var fs = require('fs');
 var url = require('url');
+
+//var ocsp = require('ocsp');
+//var agent = ocsp.Agent;
 
 
 // BIG-IP Paths
@@ -60,9 +65,9 @@ var proxy = httpProxy.createServer();
 
 //We need to get username from logon, so look for the BIGIPAuthUsernameCookie
 var usernameCookie = "BIGIPAuthUsernameCookie";
-//BIGIPAuthCookie=0BD6095556437BA7A5D7F9A786362FA5A690193E',
-//BIGIPAuthUsernameCookie=xadmin'
-//OtherName OID 1.3.6.1.4.1.311.20.2.3
+//  BIGIPAuthCookie=0BD6095556437BA7A5D7F9A786362FA5A690193E',
+//  BIGIPAuthUsernameCookie=xadmin'
+//  OtherName OID 1.3.6.1.4.1.311.20.2.3
 var username;
 
 var server = https.createServer(httpsServerOptions, function (req, res){
@@ -70,12 +75,15 @@ var server = https.createServer(httpsServerOptions, function (req, res){
 if (req.socket) {
 	var uCert = req.socket.getPeerCertificate();
 	var edipi;
-	var certCN
+	var certCN;
+
 	if (Object.prototype.toString.call(uCert.subject.CN) === '[object Array]') {
 		certCN = uCert.subject.CN.join();
 	} else {
 		certCN = uCert.subject.CN;
 	}
+
+	var edipi = certCN.substr(certCN.lastIndexOf('.') + 1, certCN.length) + '@MIL';
 
 	var emailAddress = uCert.subject.emailAddress;
 
@@ -90,7 +98,28 @@ if (req.socket) {
 	
 	var parsedEdipi = parsedSubjectAlts['value'].substr(parsedSubjectAlts['value'].toLowerCase().indexOf('@mil') - 10, 14);
 
-	console.log(parsedEdipi);
+	//console.log(parsedEdipi);
+	
+	var authHeader = new Buffer(parsedEdipi + ':' + '5unshin3' ).toString('base64');
+	//console.log(authHeader);	
+
+	var authPostOptions =	{
+        	method:	'POST',
+        	uri: 'https://127.0.0.1:444/login.jsp',
+        	form: {
+        	  username: '',
+        	  passwd: ''
+        	},
+        	headers: { 
+        	  'Authorization': 'Basic ' + authHeader}
+	};
+
+	//var authRequest = https.request(authPostOptions, function(authres) {
+	//	console.log("statusCode:", authres.statusCode);
+	//	console.log("headers:", authres.headers);
+	//});
+	
+	//authRequest.end();
 
 	console.log(new Date() +' ' + req.connection.remoteAddress +' '+ edipi +' '+ req.method +' '+ req.url);
 }
