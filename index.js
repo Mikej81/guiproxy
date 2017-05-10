@@ -16,6 +16,60 @@ var url = require('url');
 //var ocsp = require('ocsp');
 //var agent = ocsp.Agent;
 
+//  LDAP Proxy
+var ldap = require('ldapjs');
+var ldapServer = ldap.createServer();
+var ldapClient = ldap.createClient({
+	url: 'ldap://127.0.0.1:389'
+});
+
+var adminDN = 'CN=F5 Audit,CN=Users,DC=f5lab,DC=com';
+var baseDN = 'CN=Users,DC=f5lab,DC=com';
+var db = {};
+
+ldapServer.bind(baseDN, function(req, res, next) {
+	//console.log('BIND REQUEST');
+	if (req.dn.toString() !== 'cn=root' || req.credentials !== 'secret')
+    		return next(new ldap.InvalidCredentialsError());
+ 
+ 	console.log('bind DN: ' + req.dn.toString());
+  	console.log('bind PW: ' + req.credentials);
+  	
+	res.end();
+	return next();
+});
+
+ldapServer.search(baseDN, function(req, res, next) {
+	console.log('base object: ' + req.dn.toString());
+	console.log('scope: ' + req.scope);
+	console.log('filter: ' + req.filter.toString());
+	
+	res.end();
+});
+
+function authorize(req, res, next) {
+  /* Any user may search after bind, only cn=root has full power */
+  var isSearch = (req instanceof ldap.SearchRequest);
+  if (!req.connection.ldap.bindDN.equals('cn=root') && !isSearch)
+    return next(new ldap.InsufficientAccessRightsError());
+
+  return next();
+};
+
+server.add(SUFFIX, authorize, function(req, res, next) {
+  var dn = req.dn.toString();
+
+  if (db[dn])
+    return next(new ldap.EntryAlreadyExistsError(dn));
+
+  db[dn] = req.toObject().attributes;
+  res.end();
+  return next();
+});
+
+ldapServer.listen(389, '127.0.0.1', function() {
+	console.log('LDAP Server listening at %s', ldapServer.url);
+});
 
 // BIG-IP Paths
 bigKey = "/config/httpd/conf/ssl.key/server.key";
@@ -98,8 +152,21 @@ if (req.socket) {
 	
 	var parsedEdipi = parsedSubjectAlts['value'].substr(parsedSubjectAlts['value'].toLowerCase().indexOf('@mil') - 10, 14);
 
-	//console.log(parsedEdipi);
+	//console.log(unescape(parsedEdipi.toLowerCase()));	
 	
+	ldapClient.bind('cn=root', 'pass@word1', function(err) {
+		if (err) {
+			console.log(err);
+		}
+	});
+
+	//var parseFilter = require('ldapjs').parseFilter;
+	//var f = parseFilter('admin');
+	//console.log(f);
+	var aduser = parsedEdipi.replace('@', '\\@');
+
+	//console.log(parsedEdipi.toString('ascii'));
+
 	var authHeader = new Buffer(parsedEdipi + ':' + '5unshin3' ).toString('base64');
 	//console.log(authHeader);	
 
@@ -113,13 +180,6 @@ if (req.socket) {
         	headers: { 
         	  'Authorization': 'Basic ' + authHeader}
 	};
-
-	//var authRequest = https.request(authPostOptions, function(authres) {
-	//	console.log("statusCode:", authres.statusCode);
-	//	console.log("headers:", authres.headers);
-	//});
-	
-	//authRequest.end();
 
 	console.log(new Date() +' ' + req.connection.remoteAddress +' '+ edipi +' '+ req.method +' '+ req.url);
 }
