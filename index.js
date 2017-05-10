@@ -1,12 +1,6 @@
 //process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-var tls = require('tls');
-tls.CLIENT_RENEG_LIMIT = 3;
-tls.CLIENT_RENEW_WINDOW = 0;
 
 var constants = require('constants');
-
-const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION =
-  constants.SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION;
 
 var http = require('http'),
     https = require('https');
@@ -140,10 +134,9 @@ var httpsServerOptions = {
 	cert: cert,
 	agent: false,
 	requestCert: false,
-	rejectUnauthorized: false
+	rejectUnauthorized: false,
+	secureOptions: constants.SSL_OP_NO_SSLv3 | constants.SSL_OP_NO_SSLv2
 };
-
-httpsServerOptions.secureOptions = constants.SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION;
 
 // Create HTTPS/TMUI Proxy Options
 const proxyOptions = {
@@ -193,24 +186,119 @@ var username;
 
 //Create HTTPS Server to be used as Proxy VIP, this is where the magic happens
 var server = https.createServer(httpsServerOptions, function (req, res){
-	var cookies = req.headers.cookie
+	var cookies = req.headers.cookie;
+	var socket = req.connection;
+
+	server.on('request', function(req,res){
+		if (socket && cookies){
+			var reqsocket = req.connection;
+			var bigIPAuthCookie = cookies.search('BIGIPAuthCookie');
+			var userSearch = cookies.search(usernameCookie);
+			var userCookie = cookies.substr(userSearch).replace(usernameCookie + "=", '');
+			var statsCookie = cookies.search('LoginStatsAlert');
+			var lowercaseUrl = req.url.toLowerCase();
+			var bannerCookie = cookies.search('ConsentBanner');			
+
+			if (userCookie.indexOf(';') !== -1) {
+				username = userCookie.substr(0, userCookie.indexOf(';'));
+		} else {
+				username = userCookie;
+		}
+
+			if (bannerCookie == -1) {
+				proxy.web(req, res, bannerProxy);
+
+			} else if (statsCookie == -1 && bigIPAuthCookie !== -1) {
+			//  Show the User Logon Stats.
+				proxy.web(req, res, statsProxyOptions);
+			} else {
+
+                //  tls.getPeerCertificate.raw returns DER encoded buffer, this is a PITA
+                //  x.509v3 extensions arent supported by anything, so work it...
+                var uCert = reqsocket.getPeerCertificate();
+                if (uCert == null) {
+			var reneg = reqsocket.renegotiate(clientAuthOpts, function(err){
+				if (!err) {
+					console.log(req.connection.getPeerCertificate());
+				} else {
+					console.log(err.message);
+				}
+			});
+                }
+
+                var edipi;
+                var certCN;
+
+                //  Test CACs had some jumbled CN data, so lets mash it and strip it.
+                if (Object.prototype.toString.call(uCert.subject.CN) === '[object Array]') {
+                    certCN = uCert.subject.CN.join();
+                } else {
+                	certCN = uCert.subject.CN;
+                }
+
+                //  EDIPI is included in CN after users name.  BOB.BIG.BAD.867530901
+				//  Lets strip that just incase EDIPI from SubjectAltName isnt available
+				var edipi = certCN.substr(certCN.lastIndexOf('.') + 1, certCN.length) + '@MIL';
+
+				//  Email address might come in handy...
+				var emailAddress = uCert.subject.emailAddress;
+
+				//  Node-Forge started to work after figuring our encoding
+				//  Convert to raw DER to PEM for easier ASN1 conversion
+				//  Also, incase it needs to be handed to OpenSSL Wrapper for any reason.
+				var pem = forge.asn1.fromDer(uCert.raw.toString('binary'));
+				var forgecert = pki.certificateFromAsn1(pem);
+				var asn1Cert = pki.certificateToAsn1(forgecert);
+
+				//  Nothing supports the WIndows UPN x.509v3 attribute, so start at the level above
+				//  and take what we want.
+				var subjectAlt = forgecert.getExtension({id: '2.5.29.17'});
+				var jsonSubjectAlts = JSON.stringify(subjectAlt, true, 2);
+				var parsedSubjectAlts = JSON.parse(jsonSubjectAlts);
+				var keys = Object.keys(parsedSubjectAlts);
+
+				var parsedEdipi = parsedSubjectAlts['value'].substr(parsedSubjectAlts['value'].toLowerCase().indexOf('@mil') - 10, 14);
 
 
+					ldapClient.bind('userPrincipalName=f5audit', 'pass@word1', function(err) {
+					if (err) {
+						//  just for debug/test
+						console.log('NewSeach: ' + err);
+					}
+					});
+
+					//Tested Good Below
+					ldapClient.bind(adminDN, 'pass@word1', function(err) {
+					if (err) {
+						console.log('f5 audit bind err: ' + err)
+					}
+					});
+			
+			proxy.web(req, res, proxyOptions);
+
+			console.log(new Date() +' ' + req.connection.remoteAddress +' '+ edipi +' '+ req.method +' '+ req.url);
+			}
+
+		} else {
+			proxy.web(req, res, bannerProxy);
+			console.log(new Date() +' ' + req.connection.remoteAddress +' UNAUTHENTICATED_USER  '+ req.method +' '+ req.url);
+		}
+	});
 
 //  HTTPS/TLS creates the socket
-if (req.socket && cookies) {
+if (req.socket && cookies && 'this' === 'that') {
 	// Grab all the cookies
-	var bigIPAuthCookie = cookies.search('BIGIPAuthCookie');
-	var userSearch = cookies.search(usernameCookie);
-	var userCookie = cookies.substr(userSearch).replace(usernameCookie + "=", '');
-	var statsCookie = cookies.search('LoginStatsAlert');
-	var lowercaseUrl = req.url.toLowerCase();
-	var bannerCookie = cookies.search('ConsentBanner');
-    if (userCookie.indexOf(';') !== -1) {
-		username = userCookie.substr(0, userCookie.indexOf(';'));
-    } else {
-		username = userCookie;
-    }
+	//var bigIPAuthCookie = cookies.search('BIGIPAuthCookie');
+	//var userSearch = cookies.search(usernameCookie);
+	//var userCookie = cookies.substr(userSearch).replace(usernameCookie + "=", '');
+	//var statsCookie = cookies.search('LoginStatsAlert');
+	//var lowercaseUrl = req.url.toLowerCase();
+	//var bannerCookie = cookies.search('ConsentBanner');
+    //if (userCookie.indexOf(';') !== -1) {
+	//	username = userCookie.substr(0, userCookie.indexOf(';'));
+    //} else {
+	//	username = userCookie;
+    //}
     //Present Click Through Banner First, No matter what else
     if (bannerCookie == -1) {
 		proxy.web(req, res, bannerProxy);
@@ -221,39 +309,34 @@ if (req.socket && cookies) {
 	
 	} else {
 		//  Show user Logon Page or XUI
-			req.socket.renegotiate(clientAuthOpts, function(err) {
+			var renegotiate = socket.renegotiate(clientAuthOpts, function(err) {
+				console.log('tryna think but nothing happens');
 				if (err) {
 					console.log(err);
 				} else {
 					console.log('[renegotiate]');
 				}
 			});
-			req.connection.renegotiate(clientAuthOpts, function(err) {
-				if (err) {
-					console.log(err);
-				} else {
-					console.log('[renegotiated]');
-				}
-			});
+
                                 //  tls.getPeerCertificate.raw returns DER encoded buffer, this is a PITA
                                 //  x.509v3 extensions arent supported by anything, so work it...
-                                var uCert = req.socket.getPeerCertificate();
-                                var edipi;
-                                var certCN;
+                                //var uCert = req.socket.getPeerCertificate();
+                                //var edipi;
+                                //var certCN;
 
                                 //  Test CACs had some jumbled CN data, so lets mash it and strip it.
-                                if (Object.prototype.toString.call(uCert.subject.CN) === '[object Array]') {
-                                        certCN = uCert.subject.CN.join();
-                                } else {
-                                        certCN = uCert.subject.CN;
-                                }
+                                //if (Object.prototype.toString.call(uCert.subject.CN) === '[object Array]') {
+                                //        certCN = uCert.subject.CN.join();
+                                //} else {
+                                //        certCN = uCert.subject.CN;
+                                //}
 
 				//  EDIPI is included in CN after users name.  BOB.BIG.BAD.867530901
 				//  Lets strip that just incase EDIPI from SubjectAltName isnt available
-				var edipi = certCN.substr(certCN.lastIndexOf('.') + 1, certCN.length) + '@MIL';
+				//var edipi = certCN.substr(certCN.lastIndexOf('.') + 1, certCN.length) + '@MIL';
 
 				//  Email address might come in handy...
-				var emailAddress = uCert.subject.emailAddress;
+				//var emailAddress = uCert.subject.emailAddress;
 
 				//  Node-Forge started to work after figuring our encoding
 				//  Convert to raw DER to PEM for easier ASN1 conversion
@@ -288,20 +371,20 @@ if (req.socket && cookies) {
 				// future LDAP-Proxy will be used by BIG-IP to query user data
 				// This will allow attribute query to be passed to real AD while initial BIND can
 				// support random passwords.
-				ldapClient.bind('userPrincipalName=f5audit', 'pass@word1', function(err) {
-					if (err) {
-						//  just for debug/test
-						console.log('NewSeach: ' + err);
-					}
-				});
+				//ldapClient.bind('userPrincipalName=f5audit', 'pass@word1', function(err) {
+				//	if (err) {
+				//		//  just for debug/test
+				//		console.log('NewSeach: ' + err);
+				//	}
+				//});
 
 				//Tested Good Below
-				ldapClient.bind(adminDN, 'pass@word1', function(err) {
-					if (err) {
-						console.log('f5 audit bind err: ' + err)
-					};
-				});
-			proxy.web(req, res, proxyOptions);
+				//ldapClient.bind(adminDN, 'pass@word1', function(err) {
+				//	if (err) {
+				//		console.log('f5 audit bind err: ' + err)
+				//	};
+				//});
+			//proxy.web(req, res, proxyOptions);
 	}
 
 	//var authHeader = new Buffer(parsedEdipi + ':' + '5unshin3' ).toString('base64');
@@ -317,12 +400,13 @@ if (req.socket && cookies) {
 //		'Authorization': 'Basic ' + authHeader}
 //	};
 
-	console.log(new Date() +' ' + req.connection.remoteAddress +' '+ edipi +' '+ req.method +' '+ req.url);
+	//console.log(new Date() +' ' + req.connection.remoteAddress +' '+ edipi +' '+ req.method +' '+ req.url);
 
 	} else {
 		proxy.web(req, res, bannerProxy);
 		console.log(new Date() +' ' + req.connection.remoteAddress +' UNAUTHENTICATED_USER  '+ req.method +' '+ req.url);
   	}
+  	//});
 }).listen(443);
 
 // Listen for the `error` event on `proxy`.
