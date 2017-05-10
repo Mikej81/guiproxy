@@ -22,29 +22,35 @@ var ldapServer = ldap.createServer();
 var ldapClient = ldap.createClient({
 	url: 'ldap://127.0.0.1:389'
 });
+var adldapClient = ldap.createClient({
+	url: 'ldap://154.154.154.140'
+});
 
-var adminDN = 'CN=F5 Audit,CN=Users,DC=f5lab,DC=com';
+var adminDN = 'CN=F5Audit,CN=Users,DC=f5lab,DC=com';
 var baseDN = 'CN=Users,DC=f5lab,DC=com';
+var nullDN = '';
 var db = {};
 
-ldapServer.bind(baseDN, function(req, res, next) {
-	//console.log('BIND REQUEST');
+ldapServer.bind('cn=root', function(req, res, next) {
 	if (req.dn.toString() !== 'cn=root' || req.credentials !== 'secret')
-    		return next(new ldap.InvalidCredentialsError());
- 
- 	console.log('bind DN: ' + req.dn.toString());
-  	console.log('bind PW: ' + req.credentials);
-  	
+		return next(new ldap.InvalidCredentialsError());
+
+	console.log('bind DN: ' + req.dn.toString());
+	console.log('bind PW: ' + req.credentials);
+
 	res.end();
 	return next();
 });
 
-ldapServer.search(baseDN, function(req, res, next) {
+ldapServer.search(baseDN, authorize, function(req, res, next) {
 	console.log('base object: ' + req.dn.toString());
 	console.log('scope: ' + req.scope);
 	console.log('filter: ' + req.filter.toString());
-	
+
+	var dn = req.dn.toString();
+
 	res.end();
+	return next();
 });
 
 function authorize(req, res, next) {
@@ -56,46 +62,97 @@ function authorize(req, res, next) {
   return next();
 };
 
-server.add(SUFFIX, authorize, function(req, res, next) {
-  var dn = req.dn.toString();
+//ldapServer.add(baseDN, authorize, function(req, res, next) {
+//  var dn = req.dn.toString();
 
-  if (db[dn])
-    return next(new ldap.EntryAlreadyExistsError(dn));
+//  if (db[dn])
+//    return next(new ldap.EntryAlreadyExistsError(dn));
 
-  db[dn] = req.toObject().attributes;
-  res.end();
-  return next();
+//  db[dn] = req.toObject().attributes;
+//  res.end();
+//  return next();
+//});
+
+//Create an LDAP Server with Null Tree to accept any DN
+ldapServer.bind(nullDN, function(req,res, next) {
+	var dn = req.dn.toString();
+	//BIND to actual AD to verify userPrincipalName matches x509 SubjectAltName
+	//This would be tied to an F5 Query Account
+	//how to pull from auth ldap system-auth u/p?
+	adldapClient.bind(adminDN, 'pass@word1', function(err) {
+		if (err) {
+			console.log('AD Bind Error: ' + err);
+		}
+	});
+	//Clean userPrincipalName out of dn, its needed to match DN syntax for LdapJS
+	var searchDN;
+	if (dn.toLowerCase().indexOf('userprincipalname') != -1) {
+		searchDN = dn.toLowerCase().replace('userprincipalname', '');
+	}
+	var searchOptions = {
+		scope: "sub",
+		filter: "(userPrincipalName=" + searchDN + ")"
+	};
+
+	adldapClient.search(baseDN, searchOptions, function(err, res){
+		if (err) {
+			console.log(err);
+		}
+		res.on('searchEntry', function(entry) {
+			console.log('entry: ' + JSON.stringify(entry.object));
+		});
+		res.on('searchReference', function(referral) {
+			console.log('referral: ' + referral.uris.join());
+		});
+		res.on('error', function(err) {
+			console.error('error: ' + err.message);
+		});
+		res.on('end', function(result) {
+			console.log('status: ' + result.status);
+			if (result.status === 0) {
+				return next();
+			} else {
+				return next(new ldap.NoSuchObjectError);
+			}
+		});
+	//Status Code Return 0 = success
+	});
+
+	res.end();
+	return next();
 });
 
 ldapServer.listen(389, '127.0.0.1', function() {
 	console.log('LDAP Server listening at %s', ldapServer.url);
 });
 
-// BIG-IP Paths
+// BIG-IP Cert / Key Paths
 bigKey = "/config/httpd/conf/ssl.key/server.key";
 bigCert = "/config/httpd/conf/ssl.crt/server.crt";
-
-banner = fs.readFileSync('./consent_banner.html').toString();
-
+// Read Cert / Key into Memory
 var key = fs.readFileSync(bigKey);
 var cert = fs.readFileSync(bigCert);
 
+// Location of DoD Consent Banner html
+banner = fs.readFileSync('./consent_banner.html').toString();
+
+// Create HTTPS Server Options for Router 1
 const httpsServerOptions = {
 	key: key,
 	cert: cert,
 	requestCert: true,
 	rejectUnauthorized: false
 };
-
+// Create HTTPS/TMUI Proxy Options
 const proxyOptions = {
 	ssl: {
 		key: key,
 		cert: cert
-	}, 
+	},
 	target: 'https://127.0.0.1:444',
 	secure: false
 };
-
+// Create HTTPS Server Options for Router 2
 const bannerProxy = {
 	ssl: {
 		key: key,
@@ -107,79 +164,90 @@ const bannerProxy = {
 
 const statsProxyOptions = {
         ssl: {
-              	key: key,
+		key: key,
                 cert: cert
         },
 	target: 'https://127.0.0.1:445',
         secure: false
 };
 
-//Create 443 Proxy
+//Create Proxy
 var proxy = httpProxy.createServer();
 
 //We need to get username from logon, so look for the BIGIPAuthUsernameCookie
 var usernameCookie = "BIGIPAuthUsernameCookie";
+//  Values to look out for:
 //  BIGIPAuthCookie=0BD6095556437BA7A5D7F9A786362FA5A690193E',
 //  BIGIPAuthUsernameCookie=xadmin'
 //  OtherName OID 1.3.6.1.4.1.311.20.2.3
 var username;
 
+//Create HTTPS Server to be used as Proxy VIP, this is where the magic happens
 var server = https.createServer(httpsServerOptions, function (req, res){
 
+//  HTTPS/TLS creates the socket
 if (req.socket) {
+	//  tls.getPeerCertificate.raw returns DER encoded buffer, this is a PITA
+	//  x.509v3 extensions arent supported by anything, so work it...
 	var uCert = req.socket.getPeerCertificate();
 	var edipi;
 	var certCN;
-
+	//  Test CACs had some jumbled CN data, so lets mash it and strip it.
 	if (Object.prototype.toString.call(uCert.subject.CN) === '[object Array]') {
 		certCN = uCert.subject.CN.join();
 	} else {
 		certCN = uCert.subject.CN;
 	}
-
+	//  EDIPI is included in CN after users name.  BOB.BIG.BAD.867530901
+	//  Lets strip that just incase EDIPI from SubjectAltName isnt available
 	var edipi = certCN.substr(certCN.lastIndexOf('.') + 1, certCN.length) + '@MIL';
-
+	//  Email address might come in handy...
 	var emailAddress = uCert.subject.emailAddress;
-
+	//  Node-Forge started to work after figuring our encoding
+	//  Convert to raw DER to PEM for easier ASN1 conversion
+	//  Also, incase it needs to be handed to OpenSSL Wrapper for any reason.
 	var pem = forge.asn1.fromDer(uCert.raw.toString('binary'));
 	var forgecert = pki.certificateFromAsn1(pem);
 	var asn1Cert = pki.certificateToAsn1(forgecert);
-
+	//  Nothing supports the WIndows UPN x.509v3 attribute, so start at the level above
+	//  and take what we want.
 	var subjectAlt = forgecert.getExtension({id: '2.5.29.17'});
 	var jsonSubjectAlts = JSON.stringify(subjectAlt, true, 2);
 	var parsedSubjectAlts = JSON.parse(jsonSubjectAlts);
 	var keys = Object.keys(parsedSubjectAlts);
-	
+
 	var parsedEdipi = parsedSubjectAlts['value'].substr(parsedSubjectAlts['value'].toLowerCase().indexOf('@mil') - 10, 14);
 
-	//console.log(unescape(parsedEdipi.toLowerCase()));	
-	
-	ldapClient.bind('cn=root', 'pass@word1', function(err) {
+	// Now lets perform a bind to the LDAP-Proxy with the EDIPI data
+	// future LDAP-Proxy will be used by BIG-IP to query user data
+	// This will allow attribute query to be passed to real AD while initial BIND can
+	// support random passwords.
+	ldapClient.bind('userPrincipalName=f5audit', 'pass@word1', function(err) {
 		if (err) {
-			console.log(err);
+			//  just for debug/test
+			console.log('NewSeach: ' + err);
 		}
 	});
 
-	//var parseFilter = require('ldapjs').parseFilter;
-	//var f = parseFilter('admin');
-	//console.log(f);
-	var aduser = parsedEdipi.replace('@', '\\@');
-
-	//console.log(parsedEdipi.toString('ascii'));
+	//Tested Good Below
+	ldapClient.bind(adminDN, 'pass@word1', function(err) {
+		if (err) {
+			console.log('f5 audit bind err: ' + err)
+		};
+	});
 
 	var authHeader = new Buffer(parsedEdipi + ':' + '5unshin3' ).toString('base64');
-	//console.log(authHeader);	
 
-	var authPostOptions =	{
-        	method:	'POST',
-        	uri: 'https://127.0.0.1:444/login.jsp',
-        	form: {
-        	  username: '',
-        	  passwd: ''
-        	},
-        	headers: { 
-        	  'Authorization': 'Basic ' + authHeader}
-	};
+//	var authPostOptions =	{
+//        	method:	'POST',
+//        	uri: 'https://127.0.0.1:444/login.jsp',
+//        	form: {
+//        	  username: '',
+//        	  passwd: ''
+//        	},
+//        	headers: { 
+//        	  'Authorization': 'Basic ' + authHeader}
+//	};
 
 	console.log(new Date() +' ' + req.connection.remoteAddress +' '+ edipi +' '+ req.method +' '+ req.url);
 }
@@ -201,9 +269,9 @@ if (req.socket) {
 	if (bannerCookie == -1) {
 		proxy.web(req, res, bannerProxy);
 	} else if (statsCookie == -1 && bigIPAuthCookie !== -1) {
-	  proxy.web(req, res, statsProxyOptions);
+		proxy.web(req, res, statsProxyOptions);
 	} else {
-	  proxy.web(req, res, proxyOptions);
+		proxy.web(req, res, proxyOptions);
 	}
   } else {
 	proxy.web(req, res, bannerProxy);
@@ -219,13 +287,14 @@ proxy.on('error', function (err, req, res) {
   res.end('Something went wrong. And we are reporting a custom error message.');
 });
 
-//Section for Login Details Popup
+// Section for Login Details Popup
 function getUserStats(username) {
 	var userstatscmd = shell.exec('tmsh show auth login ' + username, {silent:true}).stdout;
 	return userstatscmd;
 };
 
-//Create Webserver with LoginStats
+// Create Webserver with LoginStats
+// This is ugly, create an HTML with some class
 https.createServer(httpsServerOptions, function(req, res) {
   res.writeHead(200);
 	var outstring = "<html><head>";
@@ -242,7 +311,7 @@ https.createServer(httpsServerOptions, function(req, res) {
   res.end(outstring);
 }).listen(445);
 
-//Create Webserver with Clickthrough Banner
+// Create Webserver with Clickthrough Banner
 https.createServer(httpsServerOptions, function(req, res) {
   res.writeHead(200);
   res.end(banner);
