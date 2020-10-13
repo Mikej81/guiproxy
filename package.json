@@ -12,7 +12,7 @@
     "activedirectory": "^0.7.2",
     "http-proxy": "^1.16.2",
     "ldapjs": "^1.0.1",
-    "node-forge": "^0.7.1",
+    "node-forge": "^0.10.0",
     "ocsp": "^1.2.0",
     "openssl-wrapper": "^0.3.4",
     "shelljs": "^0.7.7"
